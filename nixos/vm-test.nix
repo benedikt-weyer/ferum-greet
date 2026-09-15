@@ -45,12 +45,13 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds("pgrep -u greeter -f ferum-greet")
 
     with subtest("ferum-greet found a display mode and a GPU adapter"):
-        machine.wait_until_succeeds(
-            "journalctl -u greetd -o cat | grep -q 'display mode:'"
-        )
-        machine.wait_until_succeeds(
-            "journalctl -u greetd -o cat | grep -q 'using GPU adapter'"
-        )
+        # greetd runs the greeter attached to its VT (like it would a TUI
+        # greeter), so its stderr never reaches the journal - it logs to
+        # its own file instead (see src/main.rs).
+        log_file = "/var/lib/ferum-greet/ferum-greet.log"
+        machine.wait_until_succeeds(f"test -e {log_file}")
+        machine.wait_until_succeeds(f"grep -q 'display mode:' {log_file}")
+        machine.wait_until_succeeds(f"grep -q 'using GPU adapter' {log_file}")
 
     with subtest("greetd did not crash-loop"):
         machine.sleep(5)

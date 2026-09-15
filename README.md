@@ -30,6 +30,12 @@ There's no windowing system involved anywhere:
 - **`greetd_ipc`** drives the actual authentication handshake and session
   launch over `$GREETD_SOCK`.
 
+greetd runs the greeter attached to its VT, the same way it would a TUI
+greeter, so ferum-greet's stderr ends up on that VT rather than in the
+systemd journal. It logs to `<state_dir>/ferum-greet.log` (by default
+`/var/lib/ferum-greet/ferum-greet.log`) instead - check there, not
+`journalctl -u greetd`, when something goes wrong.
+
 ## Configuration
 
 ferum-greet reads `/etc/ferum-greet/config.toml` (override with

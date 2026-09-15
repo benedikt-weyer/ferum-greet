@@ -25,9 +25,7 @@ use drm_backend::DrmBackend;
 use input::InputEvent;
 use renderer::{Gpu, Renderer};
 
-fn main() -> Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
+fn main() -> std::process::ExitCode {
     let config_path = std::env::args()
         .nth(1)
         .filter(|a| a == "--config")
@@ -36,6 +34,43 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| PathBuf::from(config::DEFAULT_CONFIG_PATH));
     let cfg = Config::load(&config_path);
 
+    // greetd runs the greeter attached to its VT, like it would a TUI
+    // greeter - our stderr ends up on that VT, not in the systemd journal.
+    // Log to a file next to the other state we keep instead, so `journalctl
+    // -u greetd` isn't the only way to see what happened.
+    init_logging(&cfg.state_dir.join("ferum-greet.log"));
+
+    match run(cfg) {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(err) => {
+            log::error!("fatal: {err:#}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn init_logging(log_file: &std::path::Path) {
+    let builder_with_env =
+        || env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+
+    if let Some(parent) = log_file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match std::fs::OpenOptions::new().create(true).append(true).open(log_file) {
+        Ok(file) => builder_with_env()
+            .target(env_logger::Target::Pipe(Box::new(file)))
+            .init(),
+        Err(err) => {
+            builder_with_env().init();
+            log::warn!(
+                "could not open log file {} ({err}), logging to stderr instead",
+                log_file.display()
+            );
+        }
+    }
+}
+
+fn run(cfg: Config) -> Result<()> {
     let mut drm = DrmBackend::open(&cfg.drm_device)?;
     log::info!("display mode: {}x{} @ {}Hz", drm.width(), drm.height(), drm.refresh_hz());
 
