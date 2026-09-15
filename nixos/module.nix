@@ -98,9 +98,11 @@ in
       default = "auto";
       description = ''
         DRM device node to render to (e.g. `/dev/dri/card0`). `"auto"`
-        picks the first device with a connected display. Every connected
-        connector on the chosen device is driven, mirroring the same UI
-        across all of them.
+        drives every `/dev/dri/cardN` that has a connected display - this
+        spans multiple GPUs, not just multiple connectors on one card. Every
+        connected connector found is driven, mirroring the same UI across
+        all of them. Set this to a specific device to restrict rendering to
+        just that one card.
       '';
     };
 

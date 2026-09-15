@@ -10,15 +10,20 @@ straight from `evdev`.
 
 There's no windowing system involved anywhere:
 
-- **`drm`** drives every connected connector on the chosen card, each with
-  its own CRTC, mode, and pair of double-buffered "dumb buffers" for
-  scanout (legacy KMS + page flips) - plug in several monitors and the same
-  UI is mirrored on all of them.
+- **`drm`** drives every connected connector it finds - on every
+  `/dev/dri/cardN` with a display attached when `drm_device` is `"auto"`,
+  spanning multiple GPUs, not just multiple connectors on one card - each
+  with its own CRTC, mode, and pair of double-buffered "dumb buffers" for
+  scanout (legacy KMS + page flips). Plug in several monitors, on one card
+  or several, and the same UI is mirrored on all of them.
 - **`wgpu`** renders the frame off-screen into a plain texture (a headless
   `wgpu::Instance`/`Device`, requested without any surface) using Vulkan or
   GLES, whichever is available - real GPU driver or a software one
   (llvmpipe/lavapipe). Each output gets its own render target sized to its
-  own mode, since monitors can differ in resolution.
+  own mode, since monitors can differ in resolution. Because presentation is
+  a CPU blit rather than a zero-copy import, the single wgpu adapter used to
+  render can hand frames to outputs on a completely different physical GPU
+  with no DRM-PRIME sharing needed.
 - Each frame is copied from that texture back to the CPU and memcpy'd into
   the DRM buffer, then page-flipped onto the screen. This costs one extra
   copy per frame per output, which is irrelevant for a login screen that
