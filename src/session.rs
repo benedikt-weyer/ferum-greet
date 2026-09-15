@@ -20,11 +20,11 @@ pub fn save_last_user(cfg: &Config, username: &str) {
         return;
     }
     let path = cfg.last_user_file();
-    if let Some(parent) = Path::new(&path).parent() {
-        if let Err(err) = std::fs::create_dir_all(parent) {
-            log::warn!("could not create state dir {}: {err}", parent.display());
-            return;
-        }
+    if let Some(parent) = Path::new(&path).parent()
+        && let Err(err) = std::fs::create_dir_all(parent)
+    {
+        log::warn!("could not create state dir {}: {err}", parent.display());
+        return;
     }
     if let Err(err) = std::fs::write(&path, username) {
         log::warn!("could not persist last user to {}: {err}", path.display());

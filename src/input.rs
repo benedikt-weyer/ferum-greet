@@ -69,10 +69,10 @@ fn run_reader(mut device: evdev::Device, tx: Sender<InputEvent>) {
             if value == 0 {
                 continue;
             }
-            if let Some(key) = keymap::map_key(code, shift_held) {
-                if tx.send(InputEvent::Key(key)).is_err() {
-                    return;
-                }
+            if let Some(key) = keymap::map_key(code, shift_held)
+                && tx.send(InputEvent::Key(key)).is_err()
+            {
+                return;
             }
         }
     }

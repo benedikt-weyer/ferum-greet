@@ -66,22 +66,17 @@ impl Default for Config {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "kind")]
 pub enum BackgroundConfig {
     /// The wallpaper bundled by the Nix package.
+    #[default]
     Default,
     /// A solid RGB color, each channel 0-255.
     Color { r: u8, g: u8, b: u8 },
     /// A raster (PNG/JPEG) or SVG image on disk.
     Image { path: PathBuf },
-}
-
-impl Default for BackgroundConfig {
-    fn default() -> Self {
-        BackgroundConfig::Default
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
