@@ -15,6 +15,7 @@ use crate::session;
 enum Focus {
     Username,
     Password,
+    Session,
 }
 
 pub enum Outcome {
@@ -84,30 +85,25 @@ impl App {
             return Outcome::Continue;
         }
         match key {
-            Key::Char(c) => self.field_mut().push(c),
-            Key::Backspace => {
-                self.field_mut().pop();
+            Key::Char(c) => {
+                if let Some(field) = self.field_mut() {
+                    field.push(c);
+                }
             }
-            Key::Delete => {
-                self.field_mut().pop();
+            Key::Backspace | Key::Delete => {
+                if let Some(field) = self.field_mut() {
+                    field.pop();
+                }
             }
             Key::Tab => {
                 self.focus = match self.focus {
                     Focus::Username => Focus::Password,
-                    Focus::Password => Focus::Username,
+                    Focus::Password => Focus::Session,
+                    Focus::Session => Focus::Username,
                 };
             }
-            Key::Up | Key::Left => {
-                if !self.cfg.sessions.is_empty() {
-                    self.session_index =
-                        (self.session_index + self.cfg.sessions.len() - 1) % self.cfg.sessions.len();
-                }
-            }
-            Key::Down | Key::Right => {
-                if !self.cfg.sessions.is_empty() {
-                    self.session_index = (self.session_index + 1) % self.cfg.sessions.len();
-                }
-            }
+            Key::Up | Key::Left => self.cycle_session(-1),
+            Key::Down | Key::Right => self.cycle_session(1),
             Key::Escape => {
                 self.password.clear();
                 self.message = None;
@@ -131,11 +127,21 @@ impl App {
         Outcome::Continue
     }
 
-    fn field_mut(&mut self) -> &mut String {
+    fn field_mut(&mut self) -> Option<&mut String> {
         match self.focus {
-            Focus::Username => &mut self.username,
-            Focus::Password => &mut self.password,
+            Focus::Username => Some(&mut self.username),
+            Focus::Password => Some(&mut self.password),
+            Focus::Session => None,
         }
+    }
+
+    fn cycle_session(&mut self, delta: i32) {
+        let len = self.cfg.sessions.len();
+        if len == 0 {
+            return;
+        }
+        let len = len as i32;
+        self.session_index = ((self.session_index as i32 + delta).rem_euclid(len)) as usize;
     }
 
     fn try_login(&mut self) -> Outcome {
@@ -235,7 +241,7 @@ impl App {
         let (w, h) = (renderer.width() as f32, renderer.height() as f32);
 
         let card_w = 420.0_f32.min(w - 40.0);
-        let card_h = 320.0_f32.min(h - 40.0);
+        let card_h = 388.0_f32.min(h - 40.0);
         let card_x = (w - card_w) / 2.0;
         let card_y = (h - card_h) / 2.0;
 
@@ -249,6 +255,7 @@ impl App {
         let field_h = 44.0;
         let username_y = card_y + 96.0;
         let password_y = username_y + field_h + 24.0;
+        let session_y = password_y + field_h + 24.0;
 
         let accent = self.cfg.theme.accent_color;
         let accent_f = [accent[0] as f32 / 255.0, accent[1] as f32 / 255.0, accent[2] as f32 / 255.0, 1.0];
@@ -269,6 +276,11 @@ impl App {
         panels.push(SolidQuad {
             rect: Rect { x: card_x + 32.0, y: password_y, w: field_w, h: field_h },
             color: field_color(self.focus == Focus::Password),
+            radius: 10.0,
+        });
+        panels.push(SolidQuad {
+            rect: Rect { x: card_x + 32.0, y: session_y, w: field_w, h: field_h },
+            color: field_color(self.focus == Focus::Session),
             radius: 10.0,
         });
 
@@ -298,15 +310,24 @@ impl App {
             password_color,
         ));
 
-        if let Some(session) = self.cfg.sessions.get(self.session_index) {
-            labels.push(renderer.make_label(
-                &format!("Session: {}  (\u{2191}/\u{2193} to change)", session.name),
-                font * 0.8,
-                card_x + 32.0,
-                password_y + field_h + 20.0,
-                [170, 170, 180],
-            ));
-        }
+        let has_choice = self.cfg.sessions.len() > 1;
+        let chevron_color = if has_choice { [190, 190, 200] } else { [90, 90, 100] };
+        let session_text_y = session_y + (field_h - font) / 2.0 - 2.0;
+        labels.push(renderer.make_label("\u{2039}", font, card_x + 46.0, session_text_y, chevron_color));
+        let session_name = self
+            .cfg
+            .sessions
+            .get(self.session_index)
+            .map(|s| s.name.as_str())
+            .unwrap_or("No sessions configured");
+        labels.push(renderer.make_label(session_name, font, card_x + 72.0, session_text_y, [230, 230, 235]));
+        labels.push(renderer.make_label(
+            "\u{203a}",
+            font,
+            card_x + 32.0 + field_w - 28.0,
+            session_text_y,
+            chevron_color,
+        ));
 
         if let Some(action) = self.confirm_power {
             labels.push(renderer.make_label(
