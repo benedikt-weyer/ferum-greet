@@ -7,10 +7,11 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    crane.url = "github:ipetkov/crane";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, rust-overlay, flake-utils }:
+  outputs = { self, nixpkgs, rust-overlay, crane, flake-utils }:
     let
       # A small, permanently-addressable nature photo (Wikimedia Commons),
       # fetched at build time and baked in as the default wallpaper. Pinned
@@ -21,7 +22,12 @@
         hash = "sha256-amPBIdpS824hKPAafc3Lc+4Mx6kNghKhLNNo1Br2OWg=";
       };
 
-      mkFerumGreet = pkgs:
+      # Built with crane rather than `rustPlatform.buildRustPackage` so that
+      # dependency compilation (`cargoArtifacts`, everything in Cargo.lock)
+      # is its own derivation, cached separately from ferum-greet's own
+      # source - editing src/*.rs doesn't invalidate or rebuild the ~60
+      # crates it depends on.
+      mkFerumGreet = { pkgs, craneLib }:
         let
           wallpaper = defaultWallpaper pkgs;
           runtimeLibs = with pkgs; [
@@ -29,22 +35,26 @@
             libgbm
             libGL
           ];
-        in
-        pkgs.rustPlatform.buildRustPackage {
-          pname = "ferum-greet";
-          version = "0.1.0";
-          src = pkgs.lib.cleanSourceWith {
-            src = ./.;
-            filter = path: type:
-              baseNameOf path != "target";
+
+          commonArgs = {
+            src = craneLib.cleanCargoSource ./.;
+            strictDeps = true;
           };
 
-          cargoLock.lockFile = ./Cargo.lock;
+          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+        in
+        craneLib.buildPackage (commonArgs // {
+          inherit cargoArtifacts;
+          pname = "ferum-greet";
+          version = "0.1.0";
 
           nativeBuildInputs = [ pkgs.makeWrapper ];
 
           # Consumed by `option_env!("FERUM_GREET_DEFAULT_WALLPAPER")` in
-          # src/config.rs at compile time.
+          # src/config.rs at compile time. Deliberately not part of
+          # `commonArgs`/`cargoArtifacts`: it has nothing to do with
+          # dependency compilation, and would invalidate that cache every
+          # time the wallpaper URL/hash changes for no reason.
           FERUM_GREET_DEFAULT_WALLPAPER = "${wallpaper}";
 
           postFixup = ''
@@ -59,7 +69,7 @@
             platforms = platforms.linux;
             mainProgram = "ferum-greet";
           };
-        };
+        });
 
       ferumGreetModule = { config, lib, pkgs, ... }@args:
         import ./nixos/module.nix { ferum-greet = self.packages.${pkgs.system}.default; } args;
@@ -73,7 +83,9 @@
           extensions = [ "rust-src" "rust-analyzer" ];
         };
 
-        ferum-greet = mkFerumGreet pkgs;
+        craneLib = (crane.mkLib pkgs).overrideToolchain (_: rustToolchain);
+
+        ferum-greet = mkFerumGreet { inherit pkgs craneLib; };
       in
       {
         packages.default = ferum-greet;
