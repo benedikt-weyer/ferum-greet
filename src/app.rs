@@ -179,11 +179,12 @@ impl App {
             .unwrap_or_else(|| crate::config::SessionConfig {
                 name: "Default".to_string(),
                 exec: "/bin/sh -l".to_string(),
+                env: Vec::new(),
             });
         let cmd: Vec<String> = shell_words::split(&session.exec)
             .unwrap_or_else(|_| vec![session.exec.clone()]);
 
-        match client.start_session(cmd, Vec::new())? {
+        match client.start_session(cmd, session.env.clone())? {
             AuthStep::Success => {
                 session::save_last_user(&self.cfg, &self.username);
                 Ok(true)

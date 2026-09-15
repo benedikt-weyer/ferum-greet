@@ -58,6 +58,7 @@ impl Default for Config {
             sessions: vec![SessionConfig {
                 name: "Default shell".to_string(),
                 exec: "/bin/sh -l".to_string(),
+                env: Vec::new(),
             }],
             default_session: None,
             theme: ThemeConfig::default(),
@@ -92,6 +93,11 @@ pub struct SessionConfig {
     /// Command line executed by greetd to start the session, e.g.
     /// `sway` or `gnome-session` or `startplasma-wayland`.
     pub exec: String,
+    /// Extra `"KEY=VALUE"` environment variables greetd sets for the
+    /// session process, e.g. `["RUST_LOG=debug"]` for a debug variant of an
+    /// existing session.
+    #[serde(default)]
+    pub env: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

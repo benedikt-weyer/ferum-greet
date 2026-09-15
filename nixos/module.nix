@@ -18,6 +18,17 @@ let
         description = "Command line greetd runs to start this session.";
         example = "gnome-session";
       };
+      env = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        example = [ "RUST_LOG=debug" ];
+        description = ''
+          Extra `"KEY=VALUE"` environment variables greetd sets for the
+          session process - handy for a debug variant of an existing
+          session (e.g. a second entry with the same `exec` and
+          `RUST_LOG=debug`/`WAYLAND_DEBUG=1` here).
+        '';
+      };
     };
   };
 
@@ -63,7 +74,7 @@ let
     drm_device = cfg.drmDevice;
     remember_last_user = cfg.rememberLastUser;
     state_dir = cfg.stateDir;
-    sessions = map (s: { inherit (s) name exec; }) cfg.sessions;
+    sessions = map (s: { inherit (s) name exec env; }) cfg.sessions;
     background = backgroundToml;
     theme = {
       accent_color = cfg.theme.accentColor;
