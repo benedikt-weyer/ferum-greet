@@ -1,13 +1,14 @@
 //! Direct KMS/DRM display backend.
 //!
 //! This intentionally does not use a Wayland or X11 compositor: ferum-greet
-//! opens a `/dev/dri/cardN` node itself, picks a connected connector/CRTC and
-//! a mode, and scans out double-buffered "dumb buffers" that we fill with
-//! pixels rendered off-screen by wgpu (see `gpu.rs`). Presentation is a
-//! CPU blit into the dumb buffer followed by a page flip - simple and works
-//! on every KMS driver (including virtio-gpu in a VM), at the cost of an
-//! extra memcpy per frame, which is irrelevant for a login screen that only
-//! redraws on input.
+//! opens a `/dev/dri/cardN` node itself, drives every connected connector it
+//! finds on that card with its own CRTC and mode, and scans out
+//! double-buffered "dumb buffers" per output that we fill with pixels
+//! rendered off-screen by wgpu (see `gpu.rs`). Presentation is a CPU blit
+//! into the dumb buffer followed by a page flip - simple and works on every
+//! KMS driver (including virtio-gpu in a VM), at the cost of an extra memcpy
+//! per frame, which is irrelevant for a login screen that only redraws on
+//! input.
 
 use std::fs::{File, OpenOptions};
 use std::os::unix::io::{AsFd, BorrowedFd};
@@ -34,8 +35,9 @@ struct Buf {
     fb: framebuffer::Handle,
 }
 
-pub struct DrmBackend {
-    card: Card,
+/// One connected display: its own CRTC, mode, and double-buffered scanout
+/// buffers, driven independently of every other output on the card.
+struct Output {
     crtc: crtc::Handle,
     connector: connector::Handle,
     mode: drm::control::Mode,
@@ -48,10 +50,16 @@ pub struct DrmBackend {
     first_present: bool,
 }
 
+pub struct DrmBackend {
+    card: Card,
+    outputs: Vec<Output>,
+}
+
 impl DrmBackend {
     /// Opens `device` (or probes `/dev/dri/card0..15` if `device` is "auto"),
-    /// picks the first connected connector and its preferred mode, and sets
-    /// up double-buffered dumb buffers for scanout.
+    /// then drives every connected connector on that card, each with its own
+    /// CRTC and preferred mode, with double-buffered dumb buffers set up for
+    /// scanout.
     pub fn open(device: &str) -> Result<Self> {
         let card = if device == "auto" {
             Self::open_first_connected()?
@@ -108,97 +116,140 @@ impl DrmBackend {
             .resource_handles()
             .context("getting DRM resource handles")?;
 
-        let connector_info = res
+        let mut connected: Vec<connector::Info> = res
             .connectors()
             .iter()
             .filter_map(|c| card.get_connector(*c, true).ok())
-            .find(|c| c.state() == connector::State::Connected)
-            .context("no connected connector")?;
+            .filter(|c| c.state() == connector::State::Connected)
+            .collect();
+        if connected.is_empty() {
+            bail!("no connected connector");
+        }
+        // Deterministic order so logs/behavior don't depend on kernel
+        // enumeration order.
+        connected.sort_by_key(|c| (format!("{:?}", c.interface()), c.interface_id()));
 
-        let mode = *connector_info
-            .modes()
-            .iter()
-            .find(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED))
-            .or_else(|| connector_info.modes().first())
-            .context("connector has no modes")?;
+        let mut outputs = Vec::new();
+        let mut used_crtcs = Vec::new();
+        for connector_info in &connected {
+            let crtc_handle = match Self::find_crtc(&card, &res, connector_info, &used_crtcs) {
+                Ok(crtc) => crtc,
+                Err(err) => {
+                    log::warn!(
+                        "skipping connector {:?}{}: {err}",
+                        connector_info.interface(),
+                        connector_info.interface_id()
+                    );
+                    continue;
+                }
+            };
+            used_crtcs.push(crtc_handle);
 
-        let (width, height) = mode.size();
-        let (width, height) = (width as u32, height as u32);
+            let mode = *connector_info
+                .modes()
+                .iter()
+                .find(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED))
+                .or_else(|| connector_info.modes().first())
+                .context("connector has no modes")?;
+            let (width, height) = mode.size();
+            let (width, height) = (width as u32, height as u32);
 
-        let crtc_handle = Self::find_crtc(&card, &res, &connector_info)?;
+            let fmt = DrmFourcc::Xrgb8888;
+            let make_buf = || -> Result<Buf> {
+                let dumb = card
+                    .create_dumb_buffer((width, height), fmt, 32)
+                    .context("creating dumb buffer")?;
+                let fb = card
+                    .add_framebuffer(&dumb, 24, 32)
+                    .context("creating framebuffer")?;
+                Ok(Buf { dumb, fb })
+            };
+            let buffers = [make_buf()?, make_buf()?];
+            let pitch = buffers[0].dumb.pitch();
 
-        let fmt = DrmFourcc::Xrgb8888;
-        let make_buf = || -> Result<Buf> {
-            let dumb = card
-                .create_dumb_buffer((width, height), fmt, 32)
-                .context("creating dumb buffer")?;
-            let fb = card
-                .add_framebuffer(&dumb, 24, 32)
-                .context("creating framebuffer")?;
-            Ok(Buf { dumb, fb })
-        };
-        let buffers = [make_buf()?, make_buf()?];
-        let pitch = buffers[0].dumb.pitch();
+            card.set_crtc(
+                crtc_handle,
+                Some(buffers[0].fb),
+                (0, 0),
+                &[connector_info.handle()],
+                Some(mode),
+            )
+            .context("setting CRTC mode")?;
 
-        card.set_crtc(
-            crtc_handle,
-            Some(buffers[0].fb),
-            (0, 0),
-            &[connector_info.handle()],
-            Some(mode),
-        )
-        .context("setting CRTC mode")?;
+            log::info!(
+                "output {:?}{}: {width}x{height} @ {}Hz",
+                connector_info.interface(),
+                connector_info.interface_id(),
+                mode.vrefresh()
+            );
 
-        Ok(DrmBackend {
-            card,
-            crtc: crtc_handle,
-            connector: connector_info.handle(),
-            mode,
-            width,
-            height,
-            pitch,
-            buffers,
-            front: 0,
-            first_present: true,
-        })
+            outputs.push(Output {
+                crtc: crtc_handle,
+                connector: connector_info.handle(),
+                mode,
+                width,
+                height,
+                pitch,
+                buffers,
+                front: 0,
+                first_present: true,
+            });
+        }
+
+        if outputs.is_empty() {
+            bail!("no connected connector could be driven (no usable CRTC)");
+        }
+
+        Ok(DrmBackend { card, outputs })
     }
 
     fn find_crtc(
         card: &Card,
         res: &drm::control::ResourceHandles,
         connector_info: &connector::Info,
+        used: &[crtc::Handle],
     ) -> Result<crtc::Handle> {
-        // Prefer the CRTC currently driving this connector's encoder, if any.
-        if let Some(enc) = connector_info.current_encoder() {
-            if let Ok(enc_info) = card.get_encoder(enc) {
-                if let Some(crtc) = enc_info.crtc() {
-                    return Ok(crtc);
-                }
-            }
+        // Prefer the CRTC currently driving this connector's encoder, if any
+        // and if it isn't already claimed by an output we set up earlier.
+        if let Some(enc) = connector_info.current_encoder()
+            && let Ok(enc_info) = card.get_encoder(enc)
+            && let Some(crtc) = enc_info.crtc()
+            && !used.contains(&crtc)
+        {
+            return Ok(crtc);
         }
-        // Otherwise, take any CRTC that's compatible with one of the
+        // Otherwise, take any free CRTC that's compatible with one of the
         // connector's encoders.
         for enc_handle in connector_info.encoders() {
             let Ok(enc_info) = card.get_encoder(*enc_handle) else {
                 continue;
             };
-            if let Some(crtc) = res.filter_crtcs(enc_info.possible_crtcs()).first() {
-                return Ok(*crtc);
+            if let Some(crtc) = res
+                .filter_crtcs(enc_info.possible_crtcs())
+                .into_iter()
+                .find(|c| !used.contains(c))
+            {
+                return Ok(crtc);
             }
         }
-        bail!("no usable CRTC for connector")
+        bail!("no free CRTC for connector")
     }
 
-    pub fn width(&self) -> u32 {
-        self.width
+    /// Number of connected displays being driven.
+    pub fn output_count(&self) -> usize {
+        self.outputs.len()
     }
 
-    pub fn height(&self) -> u32 {
-        self.height
+    pub fn width(&self, output: usize) -> u32 {
+        self.outputs[output].width
     }
 
-    pub fn refresh_hz(&self) -> f32 {
-        let v = self.mode.vrefresh();
+    pub fn height(&self, output: usize) -> u32 {
+        self.outputs[output].height
+    }
+
+    pub fn refresh_hz(&self, output: usize) -> f32 {
+        let v = self.outputs[output].mode.vrefresh();
         if v == 0 {
             60.0
         } else {
@@ -207,49 +258,44 @@ impl DrmBackend {
     }
 
     /// Copies `pixels` (tightly matching `stride() * height()` rows, format
-    /// BGRX8888 matching `DrmFourcc::Xrgb8888`) into the back buffer and
-    /// flips to it, blocking until the flip has completed.
-    pub fn present(&mut self, pixels: &[u8], src_stride: u32) -> Result<()> {
-        let back = 1 - self.front;
+    /// BGRX8888 matching `DrmFourcc::Xrgb8888`) into `output`'s back buffer
+    /// and flips to it, blocking until the flip has completed.
+    pub fn present(&mut self, output: usize, pixels: &[u8], src_stride: u32) -> Result<()> {
+        let out = &mut self.outputs[output];
+        let back = 1 - out.front;
         {
             let mut map = self
                 .card
-                .map_dumb_buffer(&mut self.buffers[back].dumb)
+                .map_dumb_buffer(&mut out.buffers[back].dumb)
                 .context("mapping dumb buffer")?;
-            let dst_stride = self.pitch as usize;
+            let dst_stride = out.pitch as usize;
             let src_stride = src_stride as usize;
             let row_bytes = dst_stride.min(src_stride);
-            for y in 0..self.height as usize {
+            for y in 0..out.height as usize {
                 let src = &pixels[y * src_stride..y * src_stride + row_bytes];
                 let dst = &mut map[y * dst_stride..y * dst_stride + row_bytes];
                 dst.copy_from_slice(src);
             }
         }
 
-        let fb = self.buffers[back].fb;
-        if self.first_present {
+        let fb = out.buffers[back].fb;
+        if out.first_present {
             // The very first buffer was already set via set_crtc; nothing
             // has been page-flipped away from yet, so a flip has nothing to
             // wait on for the *other* buffer. Just set_crtc again onto the
             // newly-filled buffer.
             self.card
-                .set_crtc(
-                    self.crtc,
-                    Some(fb),
-                    (0, 0),
-                    &[self.connector],
-                    Some(self.mode),
-                )
+                .set_crtc(out.crtc, Some(fb), (0, 0), &[out.connector], Some(out.mode))
                 .context("setting CRTC to new framebuffer")?;
-            self.first_present = false;
+            out.first_present = false;
         } else {
             self.card
-                .page_flip(self.crtc, fb, PageFlipFlags::EVENT, None)
+                .page_flip(out.crtc, fb, PageFlipFlags::EVENT, None)
                 .context("queueing page flip")?;
             self.wait_for_flip()?;
         }
 
-        self.front = back;
+        self.outputs[output].front = back;
         Ok(())
     }
 
@@ -270,8 +316,10 @@ impl Drop for DrmBackend {
         // The kernel removes framebuffers and dumb buffers owned by this
         // file descriptor when it is closed, so explicit teardown here is
         // only a courtesy for drivers that log warnings otherwise.
-        for buf in &self.buffers {
-            let _ = self.card.destroy_framebuffer(buf.fb);
+        for out in &self.outputs {
+            for buf in &out.buffers {
+                let _ = self.card.destroy_framebuffer(buf.fb);
+            }
         }
     }
 }

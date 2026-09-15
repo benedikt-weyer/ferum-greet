@@ -50,7 +50,7 @@ pkgs.testers.runNixOSTest {
         # its own file instead (see src/main.rs).
         log_file = "/var/lib/ferum-greet/ferum-greet.log"
         machine.wait_until_succeeds(f"test -e {log_file}")
-        machine.wait_until_succeeds(f"grep -q 'display mode:' {log_file}")
+        machine.wait_until_succeeds(f"grep -q 'display 0:' {log_file}")
         machine.wait_until_succeeds(f"grep -q 'using GPU adapter' {log_file}")
 
     with subtest("greetd did not crash-loop"):

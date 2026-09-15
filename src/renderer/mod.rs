@@ -7,11 +7,11 @@ mod text;
 
 use anyhow::{Context, Result};
 
-pub use quad::{Rect, SolidQuad};
+pub use quad::{BackgroundTexture, Rect, SolidQuad};
 pub use text::Label;
 
 use glyphon::Color as TextColor;
-use quad::{BackgroundTexture, QuadRenderer};
+use quad::QuadRenderer;
 use text::TextEngine;
 
 /// Bgra8Unorm matches the byte order DRM expects for `DrmFourcc::Xrgb8888`

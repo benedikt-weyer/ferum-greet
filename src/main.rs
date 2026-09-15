@@ -71,28 +71,46 @@ fn init_logging(log_file: &std::path::Path) {
     }
 }
 
+/// Everything needed to draw and present one connected display: its own
+/// wgpu render target (outputs can have different resolutions) and
+/// background texture, matched by index to a `DrmBackend` output.
+struct OutputSurface {
+    renderer: Renderer,
+    background_tex: renderer::BackgroundTexture,
+}
+
 fn run(cfg: Config) -> Result<()> {
     let mut drm = DrmBackend::open(&cfg.drm_device)?;
-    log::info!("display mode: {}x{} @ {}Hz", drm.width(), drm.height(), drm.refresh_hz());
-
     let gpu = Gpu::new()?;
-    let mut renderer = Renderer::new(&gpu, drm.width(), drm.height());
 
-    let bg_image = background::load(&cfg.background, drm.width(), drm.height())?;
-    let background_tex = renderer.upload_background(&gpu, drm.width(), drm.height(), bg_image.as_raw());
+    let mut surfaces = Vec::with_capacity(drm.output_count());
+    for idx in 0..drm.output_count() {
+        let (width, height) = (drm.width(idx), drm.height(idx));
+        log::info!("display {idx}: {width}x{height} @ {}Hz", drm.refresh_hz(idx));
+
+        let renderer = Renderer::new(&gpu, width, height);
+        let bg_image = background::load(&cfg.background, width, height)?;
+        let background_tex = renderer.upload_background(&gpu, width, height, bg_image.as_raw());
+        surfaces.push(OutputSurface { renderer, background_tex });
+    }
 
     let mut app = app::App::new(cfg);
 
     let (tx, rx) = mpsc::channel::<InputEvent>();
     input::spawn_keyboard_readers(tx);
 
-    // Render once immediately so the screen isn't blank while waiting for
+    // Render once immediately so the screens aren't blank while waiting for
     // the first keypress, then redraw on every input event plus a slow
-    // heartbeat so the cursor/clock (if any) stays fresh.
+    // heartbeat so the cursor/clock (if any) stays fresh. The same App
+    // state drives every output, so all monitors mirror the same UI.
     loop {
-        let (panels, labels) = app.draw(&gpu, &mut renderer);
-        let frame = renderer.render_frame(&gpu, &background_tex, &panels, &labels)?;
-        drm.present(&frame.data, frame.bytes_per_row)?;
+        for (idx, surface) in surfaces.iter_mut().enumerate() {
+            let (panels, labels) = app.draw(&gpu, &mut surface.renderer);
+            let frame = surface
+                .renderer
+                .render_frame(&gpu, &surface.background_tex, &panels, &labels)?;
+            drm.present(idx, &frame.data, frame.bytes_per_row)?;
+        }
 
         match rx.recv_timeout(Duration::from_secs(30)) {
             Ok(InputEvent::Key(key)) => {

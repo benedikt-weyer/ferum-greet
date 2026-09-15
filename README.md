@@ -10,16 +10,19 @@ straight from `evdev`.
 
 There's no windowing system involved anywhere:
 
-- **`drm`** is used to pick a connected connector/mode and CRTC and set up
-  two double-buffered "dumb buffers" for scanout (legacy KMS + page flips).
+- **`drm`** drives every connected connector on the chosen card, each with
+  its own CRTC, mode, and pair of double-buffered "dumb buffers" for
+  scanout (legacy KMS + page flips) - plug in several monitors and the same
+  UI is mirrored on all of them.
 - **`wgpu`** renders the frame off-screen into a plain texture (a headless
   `wgpu::Instance`/`Device`, requested without any surface) using Vulkan or
   GLES, whichever is available - real GPU driver or a software one
-  (llvmpipe/lavapipe).
+  (llvmpipe/lavapipe). Each output gets its own render target sized to its
+  own mode, since monitors can differ in resolution.
 - Each frame is copied from that texture back to the CPU and memcpy'd into
   the DRM buffer, then page-flipped onto the screen. This costs one extra
-  copy per frame, which is irrelevant for a login screen that only redraws
-  on keypresses.
+  copy per frame per output, which is irrelevant for a login screen that
+  only redraws on keypresses.
 - **`glyphon`**/**`cosmic-text`** shape and rasterize all UI text into the
   same wgpu frame.
 - **`image`**/**`resvg`**/**`tiny-skia`** decode the background (JPEG/PNG or

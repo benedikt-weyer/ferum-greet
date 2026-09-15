@@ -98,7 +98,9 @@ in
       default = "auto";
       description = ''
         DRM device node to render to (e.g. `/dev/dri/card0`). `"auto"`
-        picks the first device with a connected display.
+        picks the first device with a connected display. Every connected
+        connector on the chosen device is driven, mirroring the same UI
+        across all of them.
       '';
     };
 
