@@ -124,13 +124,17 @@
                     # than relying on QEMU's default display heuristic.
                     graphics = true;
                     qemu.options = [ "-display" "gtk,show-cursor=on" ];
-                    # The default virtiofs-based /nix/store sharing spawns a
-                    # `virtiofsd` helper that needs privileges some sandboxed
-                    # dev environments don't grant (it fails with "Operation
-                    # not permitted" opening the store's root node). Baking
-                    # the store into the VM's own disk image sidesteps that
-                    # helper entirely, at the cost of a bigger image.
+                    # All of QEMU's host<->guest directory sharing (the
+                    # /nix/store mount and the default xchg/shared dirs)
+                    # goes through a `virtiofsd` helper that needs
+                    # privileges some sandboxed dev environments don't
+                    # grant it (it fails with "Operation not permitted"
+                    # opening the shared directory's root node). Baking the
+                    # store into the VM's own disk image and dropping the
+                    # (here unused) default shares sidesteps virtiofsd
+                    # entirely, at the cost of a bigger disk image.
                     useNixStoreImage = true;
+                    sharedDirectories = pkgs.lib.mkForce { };
                   };
                   system.stateVersion = "24.11";
                 }
