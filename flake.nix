@@ -89,17 +89,25 @@
         # testing without going through the full `nix flake check` test.
         apps.run-vm =
           let
+            hostName = "ferum-greet";
             vm = (nixpkgs.lib.nixosSystem {
               inherit system;
               modules = [
                 self.nixosModules.default
                 {
+                  networking.hostName = hostName;
                   services.ferum-greet.enable = true;
                   users.users.demo = {
                     isNormalUser = true;
                     initialPassword = "demo";
                   };
-                  virtualisation.vmVariant.virtualisation.memorySize = 2048;
+                  virtualisation.vmVariant.virtualisation = {
+                    memorySize = 2048;
+                    # Force a real GTK window with the VM's display, rather
+                    # than relying on QEMU's default display heuristic.
+                    graphics = true;
+                    qemu.options = [ "-display" "gtk,show-cursor=on" ];
+                  };
                   system.stateVersion = "24.11";
                 }
               ];
@@ -107,7 +115,7 @@
           in
           {
             type = "app";
-            program = "${vm}/bin/run-*-vm";
+            program = "${vm}/bin/run-${hostName}-vm";
           };
 
         checks.vmTest = import ./nixos/vm-test.nix {
