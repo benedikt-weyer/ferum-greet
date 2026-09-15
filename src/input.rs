@@ -20,7 +20,7 @@ pub enum InputEvent {
 /// session.
 pub fn spawn_keyboard_readers(tx: Sender<InputEvent>) {
     let mut found = 0;
-    for (path, device) in evdev::enumerate() {
+    for (path, mut device) in evdev::enumerate() {
         let is_keyboard = device
             .supported_events()
             .contains(EventType::KEY)
@@ -29,6 +29,13 @@ pub fn spawn_keyboard_readers(tx: Sender<InputEvent>) {
                 .is_some_and(|keys| keys.contains(KeyCode::KEY_ENTER));
         if !is_keyboard {
             continue;
+        }
+        // Grab the device exclusively so the kernel VT keyboard driver
+        // doesn't also see these events - without this, typed characters
+        // (including the password) get echoed in plaintext to the
+        // greeter's console/tty.
+        if let Err(err) = device.grab() {
+            log::warn!("could not grab keyboard device {} ({err}) - input may echo to the console", path.display());
         }
         found += 1;
         let tx = tx.clone();
