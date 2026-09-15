@@ -17,6 +17,8 @@ pub enum Key {
     Right,
     Up,
     Down,
+    Shutdown,
+    Reboot,
 }
 
 pub fn map_key(code: KeyCode, shift: bool) -> Option<Key> {
@@ -83,6 +85,8 @@ pub fn map_key(code: KeyCode, shift: bool) -> Option<Key> {
         KeyCode::KEY_RIGHT => Some(Key::Right),
         KeyCode::KEY_UP => Some(Key::Up),
         KeyCode::KEY_DOWN => Some(Key::Down),
+        KeyCode::KEY_F1 => Some(Key::Shutdown),
+        KeyCode::KEY_F2 => Some(Key::Reboot),
 
         _ => None,
     }

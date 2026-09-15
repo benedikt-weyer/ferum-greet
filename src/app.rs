@@ -7,6 +7,7 @@ use anyhow::Result;
 use crate::config::Config;
 use crate::greetd_client::{AuthStep, GreetdClient};
 use crate::keymap::Key;
+use crate::power::PowerAction;
 use crate::renderer::{Gpu, Rect, Renderer, SolidQuad};
 use crate::session;
 
@@ -31,6 +32,7 @@ pub struct App {
     session_index: usize,
     message: Option<(String, bool)>,
     authenticating: bool,
+    confirm_power: Option<PowerAction>,
 }
 
 impl App {
@@ -44,6 +46,7 @@ impl App {
             session_index,
             message: None,
             authenticating: false,
+            confirm_power: None,
             cfg,
         }
         .with_initial_focus()
@@ -59,6 +62,23 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: Key) -> Outcome {
+        if let Some(action) = self.confirm_power {
+            match key {
+                Key::Enter => {
+                    if let Err(err) = action.execute() {
+                        log::error!("power action failed: {err}");
+                        self.message = Some((format!("Power action failed: {err}"), true));
+                    }
+                    self.confirm_power = None;
+                }
+                Key::Escape => {
+                    self.confirm_power = None;
+                    self.message = None;
+                }
+                _ => {}
+            }
+            return Outcome::Continue;
+        }
         if self.authenticating {
             // Ignore input while blocked on a greetd round-trip.
             return Outcome::Continue;
@@ -98,6 +118,14 @@ impl App {
                     return Outcome::Continue;
                 }
                 return self.try_login();
+            }
+            Key::Shutdown => {
+                self.confirm_power = Some(PowerAction::Shutdown);
+                self.message = None;
+            }
+            Key::Reboot => {
+                self.confirm_power = Some(PowerAction::Reboot);
+                self.message = None;
             }
         }
         Outcome::Continue
@@ -280,7 +308,15 @@ impl App {
             ));
         }
 
-        if self.authenticating {
+        if let Some(action) = self.confirm_power {
+            labels.push(renderer.make_label(
+                action.confirm_label(),
+                font * 0.8,
+                card_x + 32.0,
+                card_y + card_h - 34.0,
+                [230, 190, 110],
+            ));
+        } else if self.authenticating {
             labels.push(renderer.make_label(
                 "Signing in\u{2026}",
                 font * 0.85,
@@ -292,6 +328,14 @@ impl App {
             let color = if *is_error { [230, 110, 110] } else { [170, 200, 170] };
             labels.push(renderer.make_label(message, font * 0.8, card_x + 32.0, card_y + card_h - 34.0, color));
         }
+
+        labels.push(renderer.make_label(
+            "F1 Shut down   F2 Restart",
+            font * 0.75,
+            16.0,
+            h - font * 0.75 - 16.0,
+            [180, 180, 190],
+        ));
 
         (panels, labels)
     }

@@ -10,6 +10,7 @@ mod drm_backend;
 mod greetd_client;
 mod input;
 mod keymap;
+mod power;
 mod renderer;
 mod session;
 
