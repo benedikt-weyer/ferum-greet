@@ -84,6 +84,11 @@
           program = "${ferum-greet}/bin/ferum-greet";
         };
 
+        apps.help = {
+          type = "app";
+          program = "${pkgs.writeShellScript "ferum-greet-help" (builtins.readFile ./scripts/help.sh)}";
+        };
+
         # `nix run .#run-vm` boots an interactive graphical VM of a plain
         # NixOS system with ferum-greet as its greetd greeter, for manual
         # testing without going through the full `nix flake check` test.
