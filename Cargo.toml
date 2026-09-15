@@ -2,5 +2,46 @@
 name = "ferum-greet"
 version = "0.1.0"
 edition = "2024"
+description = "A GPU-rendered login manager greeter for greetd, using DRM/KMS instead of a compositor"
+license = "AGPL-3.0-only"
+
+[[bin]]
+name = "ferum-greet"
+path = "src/main.rs"
 
 [dependencies]
+# GPU rendering (offscreen, composited to a DRM framebuffer ourselves)
+wgpu = { version = "30", default-features = false, features = ["vulkan", "gles"] }
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "1"
+
+# KMS / display setup (no Wayland/X11 - talks to /dev/dri directly)
+drm = "0.15"
+
+# GPU text rendering + shaping/layout
+glyphon = "0.12"
+cosmic-text = "0.19"
+
+# Input (keyboard) - raw evdev, no compositor/seat needed beyond device perms
+evdev = "0.13"
+
+# Images
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+
+# SVG rendering
+resvg = "0.48"
+usvg = "0.48"
+tiny-skia = "0.12"
+
+# greetd protocol
+greetd_ipc = { version = "0.10", features = ["sync-codec"] }
+
+# Config
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+
+shell-words = "1"
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+libc = "0.2"
