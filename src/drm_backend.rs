@@ -71,6 +71,7 @@ impl DrmBackend {
     }
 
     fn open_first_connected() -> Result<Card> {
+        let mut seen = Vec::new();
         for idx in 0..16 {
             let path = format!("/dev/dri/card{idx}");
             let Ok(card) = Self::open_path(Path::new(&path)) else {
@@ -79,15 +80,25 @@ impl DrmBackend {
             let Ok(res) = card.resource_handles() else {
                 continue;
             };
-            let has_connected = res
+            let connectors: Vec<_> = res
                 .connectors()
                 .iter()
-                .filter_map(|c| card.get_connector(*c, false).ok())
+                .filter_map(|c| card.get_connector(*c, true).ok())
+                .collect();
+            let has_connected = connectors
+                .iter()
                 .any(|c| c.state() == connector::State::Connected);
             if has_connected {
                 log::info!("using DRM device {path}");
                 return Ok(card);
             }
+            seen.push((
+                path,
+                connectors.iter().map(|c| format!("{:?}", c.state())).collect::<Vec<_>>(),
+            ));
+        }
+        for (path, states) in &seen {
+            log::warn!("{path}: no connected connector (saw {states:?})");
         }
         bail!("no DRM device with a connected connector found");
     }
