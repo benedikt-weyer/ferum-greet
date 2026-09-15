@@ -20,8 +20,8 @@ pub enum PowerAction {
 impl PowerAction {
     pub fn confirm_label(self) -> &'static str {
         match self {
-            PowerAction::Shutdown => "Shut down now? Enter to confirm, Esc to cancel",
-            PowerAction::Reboot => "Restart now? Enter to confirm, Esc to cancel",
+            PowerAction::Shutdown => "Shut down now? Click the icon again or press Enter to confirm, Esc to cancel",
+            PowerAction::Reboot => "Restart now? Click the icon again or press Enter to confirm, Esc to cancel",
         }
     }
 

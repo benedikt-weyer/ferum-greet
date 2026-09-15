@@ -96,8 +96,17 @@ fn run(cfg: Config) -> Result<()> {
 
     let mut app = app::App::new(cfg);
 
+    // Cursor position, tracked in output 0's pixel space and scaled to each
+    // output's own resolution when drawing (see below) so a mirrored setup
+    // shows the pointer at the same relative spot everywhere. `None` until
+    // a pointer device actually reports motion, so a mouseless greeter
+    // never draws or hit-tests a cursor at all.
+    let (ref_w, ref_h) = (drm.width(0) as f32, drm.height(0) as f32);
+    let mut cursor: Option<(f32, f32)> = None;
+
     let (tx, rx) = mpsc::channel::<InputEvent>();
-    input::spawn_keyboard_readers(tx);
+    input::spawn_keyboard_readers(tx.clone());
+    input::spawn_pointer_readers(tx);
 
     // Render once immediately so the screens aren't blank while waiting for
     // the first keypress, then redraw on every input event plus a slow
@@ -105,7 +114,9 @@ fn run(cfg: Config) -> Result<()> {
     // state drives every output, so all monitors mirror the same UI.
     loop {
         for (idx, surface) in surfaces.iter_mut().enumerate() {
-            let (panels, labels) = app.draw(&gpu, &mut surface.renderer);
+            let (out_w, out_h) = (surface.renderer.width() as f32, surface.renderer.height() as f32);
+            let out_cursor = cursor.map(|(x, y)| (x / ref_w * out_w, y / ref_h * out_h));
+            let (panels, labels) = app.draw(&gpu, &mut surface.renderer, out_cursor);
             let frame = surface
                 .renderer
                 .render_frame(&gpu, &surface.background_tex, &panels, &labels)?;
@@ -113,22 +124,37 @@ fn run(cfg: Config) -> Result<()> {
         }
 
         match rx.recv_timeout(Duration::from_secs(30)) {
-            Ok(InputEvent::Key(key)) => {
-                // Drain any additional buffered events so fast typing
-                // doesn't cause one redraw per keystroke queue backlog.
-                let mut pending = vec![key];
-                while let Ok(InputEvent::Key(k)) = rx.try_recv() {
-                    pending.push(k);
+            Ok(event) => {
+                // Drain any additional buffered events so fast typing/mouse
+                // motion doesn't cause one redraw per queued event.
+                let mut pending = vec![event];
+                while let Ok(event) = rx.try_recv() {
+                    pending.push(event);
                 }
-                for key in pending {
-                    if let Outcome::Exit = app.handle_key(key) {
-                        return Ok(());
+                for event in pending {
+                    match event {
+                        InputEvent::Key(key) => {
+                            if let Outcome::Exit = app.handle_key(key) {
+                                return Ok(());
+                            }
+                        }
+                        InputEvent::MouseMove { dx, dy } => {
+                            let (x, y) = cursor.get_or_insert((ref_w / 2.0, ref_h / 2.0));
+                            *x = (*x + dx).clamp(0.0, ref_w);
+                            *y = (*y + dy).clamp(0.0, ref_h);
+                        }
+                        InputEvent::MouseButton { pressed: true } => {
+                            if let Some((x, y)) = cursor {
+                                app.handle_click(x, y, ref_w, ref_h);
+                            }
+                        }
+                        InputEvent::MouseButton { pressed: false } => {}
                     }
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                anyhow::bail!("all keyboard input threads exited unexpectedly");
+                anyhow::bail!("all input threads exited unexpectedly");
             }
         }
     }

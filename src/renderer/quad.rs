@@ -93,11 +93,18 @@ pub struct BackgroundTexture {
     bind_group: wgpu::BindGroup,
 }
 
+#[derive(Clone, Copy)]
 pub struct Rect {
     pub x: f32,
     pub y: f32,
     pub w: f32,
     pub h: f32,
+}
+
+impl Rect {
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        x >= self.x && x < self.x + self.w && y >= self.y && y < self.y + self.h
+    }
 }
 
 pub struct SolidQuad {
