@@ -112,6 +112,13 @@
                     # than relying on QEMU's default display heuristic.
                     graphics = true;
                     qemu.options = [ "-display" "gtk,show-cursor=on" ];
+                    # The default virtiofs-based /nix/store sharing spawns a
+                    # `virtiofsd` helper that needs privileges some sandboxed
+                    # dev environments don't grant (it fails with "Operation
+                    # not permitted" opening the store's root node). Baking
+                    # the store into the VM's own disk image sidesteps that
+                    # helper entirely, at the cost of a bigger image.
+                    useNixStoreImage = true;
                   };
                   system.stateVersion = "24.11";
                 }
