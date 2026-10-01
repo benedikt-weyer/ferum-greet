@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-/// The wallpaper baked in at build time by the Nix package (a nature photo
-/// fetched from a fixed, hash-pinned URL - see `flake.nix`). Falls back to a
+/// The wallpaper baked in at build time by the Nix package (committed to the
+/// repo at `res/default-wallpaper.jpg` - see `flake.nix`). Falls back to a
 /// path that won't exist outside of the Nix build, in which case the
 /// renderer just falls back to a solid color background.
 pub const BUILTIN_DEFAULT_WALLPAPER: &str =

@@ -13,14 +13,9 @@
 
   outputs = { self, nixpkgs, rust-overlay, crane, flake-utils }:
     let
-      # A small, permanently-addressable nature photo (Wikimedia Commons),
-      # fetched at build time and baked in as the default wallpaper. Pinned
-      # by hash like any other Nix fixed-output derivation, so the build
-      # stays reproducible even though the source is a live URL.
-      defaultWallpaper = pkgs: pkgs.fetchurl {
-        url = "https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/Landscape_Arnisee-region.JPG/1920px-Landscape_Arnisee-region.JPG";
-        hash = "sha256-amPBIdpS824hKPAafc3Lc+4Mx6kNghKhLNNo1Br2OWg=";
-      };
+      # The default wallpaper, committed to the repo and baked in at build
+      # time.
+      defaultWallpaper = ./res/default-wallpaper.jpg;
 
       # Built with crane rather than `rustPlatform.buildRustPackage` so that
       # dependency compilation (`cargoArtifacts`, everything in Cargo.lock)
@@ -29,7 +24,7 @@
       # crates it depends on.
       mkFerumGreet = { pkgs, craneLib }:
         let
-          wallpaper = defaultWallpaper pkgs;
+          wallpaper = defaultWallpaper;
           runtimeLibs = with pkgs; [
             vulkan-loader
             libgbm
@@ -54,7 +49,7 @@
           # src/config.rs at compile time. Deliberately not part of
           # `commonArgs`/`cargoArtifacts`: it has nothing to do with
           # dependency compilation, and would invalidate that cache every
-          # time the wallpaper URL/hash changes for no reason.
+          # time the wallpaper image changes for no reason.
           FERUM_GREET_DEFAULT_WALLPAPER = "${wallpaper}";
 
           postFixup = ''
